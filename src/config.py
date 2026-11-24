@@ -92,10 +92,10 @@ def get_secret(name: str):
       return value.strip()
   raise KeyError(f"{name} is not set in secrets.env")
 
-# returns the 20 char LAUCN format - LAUCN prefix + 2-digit state code (13 for GA) + 3 digit county code + 7 zeroes + 2 digit MEASURE codes
+# returns the 20 char LAUCN format - LAUCN prefix + 2-digit state code (13 for GA) + 3 digit county code + 8 zeroes + 2 digit MEASURE codes
 def bls_series_id(state_codes, county_codes, measure):
   if measure not in BLS_MEASURES:
     raise ValueError(f"{measure!r} is not one of {BLS_MEASURES}")
   if len(state_codes) != 2 or len(county_codes) != 3 or measure not in BLS_MEASURES:
     raise ValueError(f"bad LAUCN inputs: {state_codes!r} {county_codes!r} {measure!r}")
-  return f"LAUCN{state_codes}{county_codes}{'0' * 7}{measure}"
+  return f"LAUCN{state_codes}{county_codes}{'0' * 8}{measure}"
