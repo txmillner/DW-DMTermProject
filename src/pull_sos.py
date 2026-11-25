@@ -96,7 +96,7 @@ def main():
             continue
         code, payload = fetch_payload(eid, c)
         if payload:
-            line = json.dumps({"shortName": c, "name": c, "data": payload})
+            line = json.dumps({"shortName": c, "name": data["name"], "data": payload})
             jfile.write(line + "\n")
         mw.writerow([eid, year, date, c, c,
                      "ok" if payload else "empty", code,
