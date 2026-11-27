@@ -55,25 +55,29 @@ def load_data(cur):
 
 # for per county predictions
 def aggregate_to_county_election(df):
-  feature_cols = [c for c in df.columns if c not in ['county_id', 'election_id', 'year', 'margin_pp']]
+  # Only aggregate numeric feature columns; drop non-numeric
+  exclude = {'county_id', 'election_id', 'year', 'margin_pp', 'contest', 'party', 'vote_count', 'election_id'}
+  numeric_cols = [c for c in df.columns 
+                  if c not in exclude and pd.api.types.is_numeric_dtype(df[c])]
   agg_dict = {'margin_pp': 'mean'}
-  for col in feature_cols:
-      agg_dict[col] = 'first'
-  return df.groupby(['county_id', 'election_id', 'year']).agg(agg_dict).reset_index()
+  for col in [c for c in df.columns if c not in {'county_id', 'year', 'margin_pp'} 
+              and pd.api.types.is_numeric_dtype(df[c])]:
+      agg_dict[col] = 'mean'
+  # Group by county and year only (not election_id) for county-level aggregation
+  return df.groupby(['county_id', 'year']).agg(agg_dict).reset_index()
 
 def load_2026_features(cur):
+  # Demographics (2024 ACS)
   cur.execute("""
     SELECT fd.county_id, fd.var_id, fd.value
     FROM fact_demographics fd
     WHERE fd.ref_year = 2024 AND fd.var_id IN %s
   """, (tuple(config.CENSUS_VARS),))
   demo_rows = cur.fetchall()
-  
-  # pivot demographics , county id x var id
   demo_df = pd.DataFrame(demo_rows, columns=['county_id', 'var_id', 'value'])
   demo_pivot = demo_df.pivot(index='county_id', columns='var_id', values='value').reset_index()
 
-  # 2025 econ/ bls measures
+  # 2025 economy/BLS measures
   cur.execute("""
     SELECT fe.county_id, fe.measure, AVG(fe.value) as avg_value
     FROM fact_economy fe
@@ -82,34 +86,49 @@ def load_2026_features(cur):
   """)
   econ_rows = cur.fetchall()
   econ_df = pd.DataFrame(econ_rows, columns=['county_id', 'measure', 'avg_value'])
-  econ_pivot = econ_df.pivot(index='county_id', columns='measure',values='avg_value').reset_index()
-  # merge
+  econ_pivot = econ_df.pivot(index='county_id', columns='measure', values='avg_value').reset_index()
+
+  # 2025 CPI (national, same for all counties)
+  cur.execute("SELECT value FROM fact_economy WHERE measure = 'cpi' AND year = 2025 LIMIT 1")
+  cpi_row = cur.fetchone()
+  cpi_2025 = cpi_row[0] if cpi_row else 300.0  # fallback
+
+  # merge demographics + economy
   features = demo_pivot.merge(econ_pivot, on='county_id', how='outer')
+  # add CPI as a feature (same for all counties)
+  features['cpi_2025'] = cpi_2025
   return features
 
 #train
 def train_models(train_df):
   margin = train_df["margin_pp"]
-  y_reg = margin + margin.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
-  y_clf = margin.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+  y_reg = train_df["margin_pp"]  # Ridge predicts margin_pp directly
+  y_clf = train_df["margin_pp"].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
   
+  # Feature columns (exclude IDs, target, time)
+  feature_cols = [c for c in train_df.columns if c not in ['county_id', 'election_id', 'year', 'margin_pp', 'contest']]
+  X = train_df[feature_cols]
+  
+  # Persistence baseline: previous election's margin per county
   last_train_year = max(TRAIN_YEARS)
   train_last = train_df[train_df["year"] == last_train_year].groupby("county_id")["margin_pp"].mean()
   pred = train_df["county_id"].map(train_last)
   
-  from sklearn.linear_model import Ridge
+  # Ridge regression on all features
   ridge = Ridge()
-  ridge.fit(train_df[["margin_pp"]], margin)
+  ridge.fit(X, train_df["margin_pp"])
   
+  # RandomForest classification on sign(margin)
   from sklearn.ensemble import RandomForestClassifier
   rf = RandomForestClassifier(n_estimators=100, random_state=42)
-  rf.fit(train_df[["margin_pp"]], margin.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0)))
+  y_clf = train_df["margin_pp"].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+  rf.fit(X, y_clf)
   
   return {
-    "persistence_mae": abs(pred - margin).mean(),
-    "ridge_score": ridge.score(train_df[["margin_pp"]], margin),
-    "rf_accuracy": rf.score(train_df[["margin_pp"]], margin.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))),
-    "feature_importance": rf.feature_importances_[0] if hasattr(rf, "feature_importances_") else 0.0
+    "persistence_mae": abs(pred - train_df["margin_pp"]).mean(),
+    "ridge_score": ridge.score(X, train_df["margin_pp"]),
+    "rf_accuracy": rf.score(X, y_clf),
+    "feature_importance": dict(zip(train_df[feature_cols].columns, rf.feature_importances_)) if hasattr(rf, "feature_importances_") else {}
   }
 
 
@@ -133,7 +152,7 @@ def predict_2026(cur, model_bundle):
 
   hist = pd.DataFrame(cur.fetchall(), columns=['county_id', 'election_id', 'year', 'margin_pp'])
   train_df = aggregate_to_county_election(hist.merge(load_2026_features(cur), on='county_id'))
-  feature_cols = [c for c in train_df.columns if c not in ['county_id', 'election_id', 'year', 'margin_pp']]
+  feature_cols = [c for c in train_df.columns if c not in ['county_id', 'election_id', 'year', 'margin_pp', 'contest']]
   ridge = Ridge().fit(train_df[feature_cols], train_df['margin_pp'])
   y_clf = train_df['margin_pp'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
   rf = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -191,8 +210,12 @@ def main():
   train_years = TRAIN_YEARS + VALIDATE_YEARS  # 2012-2022
   train_df = df[df['year'].isin(train_years)]
   test_df = df[df['year'] == TEST_YEAR]
+  
+  # Aggregate to county-election level for training
+  train_df_agg = aggregate_to_county_election(train_df)
+  
   # train 
-  results = train_models(train_df)
+  results = train_models(train_df_agg)
   print('results:', results)
   
   # eval

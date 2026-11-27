@@ -121,7 +121,11 @@ def load_fact_county_contest(conn, cursor):
             contest_name = "UNKNOWN"
           contest_key = contest_name.upper().replace(" ", "_")[:20]
           for opt in (item.get("summaryResults") or {}).get("ballotOptions", []):
-            party = opt.get("party", {}).get("abbreviation", "OTHER")
+            party = (opt.get("party", {}) or {}).get("abbreviation", "OTHER")
+            if party:
+                party = party.upper()
+            else:
+                party = "OTHER"
             if party not in ("DEM", "REP"):
               party = "OTHER"
             vote_count = opt.get("voteCount", 0)
