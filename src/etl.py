@@ -53,12 +53,10 @@ def load_dim_county(conn, cursor):
   with path.open(newline="") as f:
     rows = list(csv.DictReader(f))
   for r in rows:
-    fips = r["county"]
+    codes = r["county"]
     name = r["NAME"].split(",")[0].strip()
     region = name.replace(" County", "")  # placeholder: will refine later
-    upsert_dim(conn, cursor, "dim_county",
-               ["county_fips", "county_name", "region"],
-               (fips, name, region))
+    upsert_dim(conn, cursor, "dim_county", ["county_codes", "county_name", "region"], (codes, name, region))
   conn.commit()
   print(f"  dim_county: {len(rows)} rows")
   return len(rows)
@@ -88,7 +86,7 @@ def load_fact_county_contest(conn, cursor):
         county_short = obj["shortName"]
         data = obj["data"]
         # county_id lookup
-        cursor.execute("SELECT county_id FROM dim_county WHERE county_fips = %s", (county_short,))
+        cursor.execute("SELECT county_id FROM dim_county WHERE county_codes = %s", (county_short,))
         row = cursor.fetchone()
         if row is None:
           continue
@@ -126,12 +124,12 @@ def load_fact_demographics(conn, cursor):
     with path.open(newline="") as f:
       reader = csv.DictReader(f)
       for row in reader:
-        county_fips = row["county"]
-        cursor.execute("SELECT county_id FROM dim_county WHERE county_fips = %s", (county_fips,))
+        county_codes = row["county"]
+        cursor.execute("SELECT county_id FROM dim_county WHERE county_codes = %s", (county_codes,))
         county_row = cursor.fetchone()
         if county_row is None:
           continue
-        county_id = county_row[0]
+        county_id = county_row["county_id"]
         for var_id in config.CENSUS_VARS:
           val = row.get(var_id)
           if val is None:
@@ -159,20 +157,20 @@ def load_fact_economy(conn, cursor):
     reader = csv.DictReader(f)
     for row in reader:
       sid = row["series_id"]
-      # sid: LAUCN{state_fips}{county_fips}{8 zeros}{measure}
+      # sid: LAUCN{state_codes}{county_codes}{8 zeros}{measure}
       # Example: LAUCN1302100000003 -> state=13, county=021, zeros=00000000, measure=03
-      county_fips = sid[5:8]   # 3-digit county FIPS
+      county_codes = sid[5:8]   # 3-digit county FIPS
       measure = sid[-2:]       # last 2 chars = BLS measure code
       year = to_int(row["year"])
       month = to_int(row["month"])
       value = to_float(row["value"])
       if year is None or month is None:
         continue
-      cursor.execute("SELECT county_id FROM dim_county WHERE county_fips = %s", (county_fips,))
+      cursor.execute("SELECT county_id FROM dim_county WHERE county_codes = %s", (county_codes,))
       county_row = cursor.fetchone()
       if county_row is None:
         continue
-      county_id = county_row[0]
+      county_id = county_row["county_id"]
       upsert_dim(conn, cursor, "fact_economy",
                  ["county_id", "measure", "year", "month", "value"],
                  (county_id, measure, year, month, value))
@@ -191,14 +189,14 @@ def run_dq_checks(conn, cursor):
   for table in ("dim_county", "dim_election", "fact_county_contest",
                 "fact_demographics", "fact_economy"):
     cursor.execute(f"SELECT COUNT(*) FROM {table}")
-    cnt = cursor.fetchone()[0]
+    cnt = cursor.fetchone()["count"]
     lines.append(f"- {table}: {cnt} rows")
   # null counts for key columns
   for table, col in (("fact_demographics", "value"),
                      ("fact_economy", "value"),
                      ("fact_county_contest", "vote_count")):
     cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {col} IS NULL")
-    null_cnt = cursor.fetchone()[0]
+    null_cnt = cursor.fetchone()["count"]
     lines.append(f"- {table}.{col} NULLs: {null_cnt}")
   # distinct parties in fact_county_contest
   cursor.execute("SELECT DISTINCT party FROM fact_county_contest")

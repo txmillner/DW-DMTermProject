@@ -25,6 +25,17 @@ ELECTION_VINTAGES = { # vintage is the census' verbage
   2026: 2024,
 }
 
+GENERAL_ELECTIONS = [
+    ("2012NovGen", "2012", "2012-11-06"),
+    ("2014NovGen", "2014", "2014-11-04"),
+    ("2016NovGen", "2016", "2016-11-08"),
+    ("2018NovGen", "2018", "2018-11-06"),
+    ("2020NovGen", "2020", "2020-11-03"),
+    ("2022NovGen", "2022", "2022-11-08"),
+    ("2024NovGen", "2024", "2024-11-05"),
+    ("11032026GeneralAndSpecialElection", "2026", "2026-11-03"),
+]
+
 CENSUS_VARS = [
   # Employment status
   "DP03_0007PE",  # % not in labor force (16+)
