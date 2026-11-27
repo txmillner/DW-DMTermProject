@@ -76,6 +76,20 @@ def load_dim_election(conn, cursor):
 # load fact_county_contest from the SOS .jsonl files
 def load_fact_county_contest(conn, cursor):
   total = 0
+  name_to_code = {}
+  for csv_file in config.RAW.glob('census_*.csv'):
+    with open(csv_file) as f:
+      reader = csv.reader(f)
+      header = next(reader)
+      for row in reader:
+        if len(row) < 2: continue
+        cname = row[0]                    # ex: 'Appling County, Georgia'
+        code = row[-1]                    # ex: '001', '003', etc.
+        if code and code.isdigit():
+          norm = cname.lower()
+          for suffix in [' county, georgia', ' county, ga', ' county']:
+            norm = norm.replace(suffix, '')
+          name_to_code[norm.strip().replace(' ', '-')] = code
   for eid, year, _ in config.GENERAL_ELECTIONS:
     path = config.RAW / f"sos_{eid}.jsonl"
     if not path.exists():
@@ -84,13 +98,18 @@ def load_fact_county_contest(conn, cursor):
       for line in f:
         obj = json.loads(line)
         county_short = obj["shortName"]
+        # translate SOS shortName to 3-digit fips code via census mapping
+        norm_key = county_short.lower().replace("-county-ga", "").replace("-county-georgia", "")
+        if norm_key not in name_to_code:
+          continue
+        code = name_to_code[norm_key]
         data = obj["data"]
         # county_id lookup
-        cursor.execute("SELECT county_id FROM dim_county WHERE county_codes = %s", (county_short,))
+        cursor.execute("SELECT county_id FROM dim_county WHERE county_codes = %s", (code,))
         row = cursor.fetchone()
         if row is None:
           continue
-        county_id = row[0]
+        county_id = row["county_id"]
         for item in data.get("ballotItems", []):
           contest_name = item.get("name") or []
           if isinstance(contest_name, list) and contest_name:
@@ -200,7 +219,7 @@ def run_dq_checks(conn, cursor):
     lines.append(f"- {table}.{col} NULLs: {null_cnt}")
   # distinct parties in fact_county_contest
   cursor.execute("SELECT DISTINCT party FROM fact_county_contest")
-  parties = [r[0] for r in cursor.fetchall()]
+  parties = [r["party"] for r in cursor.fetchall()]
   lines.append(f"- fact_county_contest parties: {parties}")
   with report_path.open("w") as f:
     f.write("\n".join(lines) + "\n")
