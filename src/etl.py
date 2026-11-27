@@ -99,7 +99,8 @@ def load_fact_county_contest(conn, cursor):
         obj = json.loads(line)
         county_short = obj["shortName"]
         # translate SOS shortName to 3-digit fips code via census mapping
-        norm_key = county_short.lower().replace("-county-ga", "").replace("-county-georgia", "")
+        #norm_key = county_short.lower().replace("-county-ga", "").replace("-county-georgia", "")
+        norm_key = county_short.lower().replace("-county-ga","").replace("-county-georgia", "").replace("-county", "")
         if norm_key not in name_to_code:
           continue
         code = name_to_code[norm_key]
@@ -176,10 +177,13 @@ def load_fact_economy(conn, cursor):
     reader = csv.DictReader(f)
     for row in reader:
       sid = row["series_id"]
-      # sid: LAUCN{state_codes}{county_codes}{8 zeros}{measure}
-      # Example: LAUCN1302100000003 -> state=13, county=021, zeros=00000000, measure=03
-      county_codes = sid[5:8]   # 3-digit county FIPS
+      state_codes = sid[5:7]
+      #county_codes = sid[5:8]   # 3-digit county FIPS
+      state_fips = sid[5:7]
+      county_codes = sid[7:10]
       measure = sid[-2:]       # last 2 chars = BLS measure code
+      if state_codes != config.STATE_CODE:
+        continue
       year = to_int(row["year"])
       month = to_int(row["month"])
       value = to_float(row["value"])
