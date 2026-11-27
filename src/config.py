@@ -7,6 +7,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent # repo/src/file
 RAW = ROOT / "data" / "raw"
 
+
+PG_HOST = "localhost"
+PG_PORT = 5432
+PG_DB = "warehouse"
+PG_USER = "txmillner"
+
 STATE_CODE = "13" # GA code is 13
 ELECTION_VINTAGES = { # vintage is the census' verbage
   2012: 2010,
