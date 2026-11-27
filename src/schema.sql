@@ -2,7 +2,7 @@
 -- ga counties, 159 rows
 CREATE TABLE dim_county (
   county_id    BIGSERIAL PRIMARY KEY,
-  county_fips  TEXT NOT NULL UNIQUE,
+  county_codes  TEXT NOT NULL UNIQUE,
   county_name  TEXT NOT NULL,
   state_code   TEXT NOT NULL DEFAULT '13',
   region       TEXT
@@ -69,7 +69,7 @@ END), 0), 4) AS margin_pp
 FROM fact_county_contest fc
 JOIN dim_county dc ON fc.county_id = dc.county_id
 JOIN dim_election de ON fc.election_id = de.election_id
-GROUP BY dc.region, de.year, fc.contest;
+GROUP BY dc.region, de.year, fc.county_id, fc.contest, fc.election_id;
 
 -- model input view with anti-leakage joins
 CREATE VIEW v_model AS
@@ -95,5 +95,5 @@ SELECT
   v.county_id,
   v.contest,
   de.year,
-  v.dem_minus_rep
+  v.margin_pp
 FROM v_lean v JOIN dim_election de ON v.election_id = de.election_id;
